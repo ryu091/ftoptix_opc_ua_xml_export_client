@@ -6,8 +6,7 @@ import sys
 import progressbar
 
 from asyncua import Client
-
-from XmlExporter import XmlExporter
+from XmlExporterOptix import XmlExporter
 
 
 class NodeXMLExporter:
@@ -27,7 +26,6 @@ class NodeXMLExporter:
         self.nodes.append(node)
         self.logger.debug("Add %s" % node)
         browse_progressbar.update(len(self.nodes))
-        # iterate over all referenced nodes (31), only hierarchical references (33)
         for child in await node.get_children(refs=33):
             if child not in self.nodes:
                 await self.iterater_over_child_nodes(child, browse_progressbar)
@@ -45,36 +43,29 @@ class NodeXMLExporter:
         exp = XmlExporter(self.client, export_values, bar.update)
         await exp.build_etree(nodes)
         await exp.write_xml(output_file)
+
+        # Replace KEPServerEX with KEPServerEnterprise after export
+        with open(output_file, "r", encoding="utf-8") as f:
+            xml_content = f.read()
+        xml_content = xml_content.replace("<Uri>KEPServerEX</Uri>", "<Uri>KEPServerEnterprise</Uri>")
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(xml_content)
+
         self.logger.info("Export finished")
 
     async def import_nodes(self, server_url="opc.tcp://localhost:16664", username="", password=""):
         from asyncua.crypto import security_policies
-        import types
-        from asyncua.ua.uaprotocol_hand import CryptographyNone
 
         self.client = Client(server_url)
-        if username is not None:
+        if username:
             self.client.set_user(username)
-
-        if password is not None:
+        if password:
             self.client.set_password(password)
-
-        # Fix symmetric_key_size (not 0) of securityPolicy
-        # sec_policy = security_policies.SecurityPolicy()
-        # sec_policy.symmetric_key_size = 8
-        # self.client.security_policy = sec_policy
-
-        # Fix signature method of CryptographyNone
-        # def signature(self, data):
-        #    return None
-        # fixed_signature = types.MethodType(signature, CryptographyNone)
-        # self.client.security_policy.asymmetric_cryptography.signature = fixed_signature
 
         try:
             await self.client.connect()
         except Exception as e:
             self.logger.error("No connection established", e)
-            self.logger.error(e)
             self.logger.error("Exiting ...")
             sys.exit()
 
@@ -91,10 +82,8 @@ class NodeXMLExporter:
     async def statistics(self):
         self.logger.info("Calculating statistics")
         typecounts_per_namespace = {}
-        nodecount = len(self.nodes)
         bar = progressbar.ProgressBar()
-        for idx in bar(range(nodecount)):
-            node = self.nodes[idx]
+        for node in bar(self.nodes):
             try:
                 node_class = str(await node.read_node_class())
                 ns = node.nodeid.NamespaceIndex
@@ -115,27 +104,20 @@ class NodeXMLExporter:
 
 
 async def main():
-    parser = argparse.ArgumentParser(
-        description="Export Node XML from OPC UA server")
+    parser = argparse.ArgumentParser(description="Export Node XML from OPC UA server")
     parser.add_argument('serverUrl', help='Complete URL of the OPC UA server', default="opc.tcp://localhost:16664")
-    parser.add_argument('-n', '--namespace',
-                        metavar='<namespace>',
-                        dest="namespaces",
-                        action="append",
-                        type=int,
-                        help='Export only the given namespace indexes. Multiple NS indexes can be specified. If not specified, export all nodes.')
-    parser.add_argument('outputFile',  default="nodes_output.xml",
-                        help='Save exported nodes in specified XML file')
-    parser.add_argument('-u', '--username', default="", metavar='<username>', dest="username", help="Username to login on server")
-    parser.add_argument('-p', '--password', default="", metavar='<password>', dest="password", help="Password to login on server")
-    parser.add_argument('-v', '--values', default=False, metavar='<values>', dest="export_values", help="Export node values to nodeset")
+    parser.add_argument('-n', '--namespace', metavar='<namespace>', dest="namespaces", action="append", type=int,
+                        help='Export only the given namespace indexes.')
+    parser.add_argument('outputFile', default="nodes_output.xml", help='Save exported nodes in specified XML file')
+    parser.add_argument('-u', '--username', default="", metavar='<username>', dest="username", help="Username")
+    parser.add_argument('-p', '--password', default="", metavar='<password>', dest="password", help="Password")
+    parser.add_argument('-v', '--values', default=False, metavar='<values>', dest="export_values", help="Export values")
     args = parser.parse_args()
 
     exporter = NodeXMLExporter()
     await exporter.import_nodes(server_url=args.serverUrl, username=args.username, password=args.password)
     await exporter.statistics()
     await exporter.export_xml(args.namespaces, args.outputFile, args.export_values)
-
     await exporter.client.disconnect()
 
 
