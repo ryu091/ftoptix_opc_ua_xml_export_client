@@ -17,11 +17,12 @@ Dependencies
 Install
 
 ---
-
 ```bash
 git clone https://github.com/ryu091/ftoptix_opc_ua_xml_export_client.git
 ```
-
+```bash
+cd ftoptix_opc_ua_xml_export_client
+```
 ```bash
 pip install -r requirements.txt
 ```
