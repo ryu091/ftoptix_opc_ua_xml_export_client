@@ -42,6 +42,7 @@ class XmlExporter(xmlexporter.XmlExporter):
         self.logger.info('Building XML etree')
 
         await self._add_namespaces(node_list)
+        self._add_models_els()  # Insert <Models> section
 
         # add all nodes in the list to the XML etree
         progress = 0
@@ -83,33 +84,54 @@ class XmlExporter(xmlexporter.XmlExporter):
         nodeid = node.nodeid
         parent = await node.get_parent()
         displayname = (await node.read_display_name()).Text
-        desc = None
+
         try:
-            desc = await node.read_description()
-            if desc:
-                desc = desc.Text
+            desc_obj = await node.read_description()
+            desc = desc_obj.Text if desc_obj and desc_obj.Text else None
         except:
-            pass
+            desc = None
+
         node_el = Et.SubElement(self.etree.getroot(), nodetype)
         node_el.attrib["NodeId"] = self._node_to_string(nodeid)
         node_el.attrib["BrowseName"] = self._bname_to_string(browsename)
+
         if parent is not None:
             node_class = await node.read_node_class()
             if node_class in (ua.NodeClass.Object, ua.NodeClass.Variable, ua.NodeClass.Method):
                 node_el.attrib["ParentNodeId"] = self._node_to_string(parent)
-        self._add_sub_el(node_el, 'DisplayName', displayname)
-        if desc not in (None, ""):
-            self._add_sub_el(node_el, 'Description', desc)
-        # FIXME: add WriteMask and UserWriteMask
+
+        self._add_sub_el(node_el, 'DisplayName', displayname, {"Locale": "en"})
+        self._add_sub_el(node_el, 'Description', desc or "", {"Locale": "en"})
+
         await self._add_ref_els(node_el, node)
-        return node_el  
-        
+        return node_el
+
     async def _all_fields_to_etree(self, struct_el, val):
         for field in fields(val):
-            # FIXME; what happend if we have a custom type which is not part of ObjectIds???
             _logger.info(f"field name = '{field.name}'")
             if field.name == "Encoding":
                 continue
             type_name = type_string_from_type(field.type)
-            await self.member_to_etree(struct_el, field.name, ua.NodeId(getattr(ua.ObjectIds, type_name)), getattr(val, field.name))       
-   
+            await self.member_to_etree( struct_el, field.name, ua.NodeId(getattr(ua.ObjectIds, type_name)), getattr(val, field.name) )
+
+    def _add_models_els(self):
+        models_el = Et.SubElement(self.etree.getroot(), "Models")
+        model_el = Et.SubElement(models_el, "Model", {"ModelUri": "KEPServerEnterprise"})
+        Et.SubElement(model_el, "RequiredModel", {"ModelUri": "http://opcfoundation.org/UA/"})
+        # Et.SubElement(model_el, "RequiredModel", {
+            # "ModelUri": "urn:FTOptix:TagImporter",
+            # "Version": "1.0.8.102"
+        # })
+        # Et.SubElement(model_el, "RequiredModel", {
+            # "ModelUri": "urn:FTOptix:OPCUAImporter",
+            # "Version": "1.0.8.115"
+        # })
+
+    def _add_sub_el(self, parent, tag, text, attrib=None):
+        subel = Et.SubElement(parent, tag)
+        if attrib:
+            for k, v in attrib.items():
+                subel.set(k, v)
+        if text != "":
+            subel.text = str(text)
+        return subel
